@@ -1,38 +1,206 @@
-<script>
-    // ... (상단 생략) ...
-
-    setInterval(async () => {
-        try {
-            const response = await fetch(`${API_URL}/api/clock-out`);
-            const data = await response.json();
-            let seconds = data.seconds_left;
-            
-            document.getElementById("target-display").innerText = `🎯 오늘의 탈출 목표: ${data.target_time}`;
-
-            if (seconds <= 0) {
-                document.getElementById("timer").innerText = "FREEDOM!!";
-                document.getElementById("timer").style.color = "#ff3f34";
-                document.getElementById("msg").innerText = "노트북 던지고 당장 런 하세요!!! 🏃‍♀️💨✨";
-                document.body.style.backgroundColor = "#2d3436";
-            } else {
-                // 시간, 분, 초 계산 로직 추가!! !
-                const h = Math.floor(seconds / 3600);
-                const m = Math.floor((seconds % 3600) / 60);
-                const s = seconds % 60;
-
-                let timeString = "";
-                if (h > 0) timeString += `${h}시간 `;
-                if (m > 0 || h > 0) timeString += `${m}분 `;
-                timeString += `${s}초`;
-
-                document.getElementById("timer").innerText = timeString;
-                document.getElementById("msg").innerText = "시간은 흐릅니다!! 조금만 더 존버!!! ⏳🔥";
-                document.getElementById("timer").style.color = "#0fbcf9";
-                document.body.style.backgroundColor = "#1e272e";
-            }
-        } catch (error) {
-            document.getElementById("timer").innerText = "OFFLINE";
-            document.getElementById("msg").innerText = "서버가 세령님을 기다리는 중... 🚨";
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>세령이의 퇴근 타이머 🐬</title>
+    <style>
+        :root {
+            --bg-color: #1e272e;
+            --main-blue: #0fbcf9;
+            --accent-yellow: #ffd32a;
         }
-    }, 1000);
-</script>
+        body {
+            background-color: var(--bg-color);
+            color: #d2dae2;
+            font-family: 'Apple SD Gothic Neo', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+            transition: background-color 0.5s ease;
+        }
+        h1 {
+            font-size: 2.5rem;
+            color: #808e9b;
+            margin-bottom: 10px;
+            user-select: none;
+        }
+        #dolphin-btn {
+            cursor: pointer;
+            font-size: 3rem;
+            transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            display: inline-block;
+        }
+        #target-display {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 8px 20px;
+            border-radius: 30px;
+            font-size: 1.1rem;
+            margin-bottom: 30px;
+            color: #4bcffa;
+            border: 1px solid rgba(15, 188, 249, 0.2);
+        }
+        #timer {
+            color: var(--main-blue);
+            font-size: 8rem;
+            font-weight: 900;
+            letter-spacing: -2px;
+            text-shadow: 0 0 30px rgba(15, 188, 249, 0.3);
+        }
+        .message {
+            font-size: 1.4rem;
+            margin-top: 25px;
+            color: var(--accent-yellow);
+            font-weight: 500;
+        }
+        #admin-panel {
+            display: none;
+            position: absolute;
+            bottom: 50px;
+            padding: 25px;
+            border-radius: 20px;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--main-blue);
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+            animation: slideUp 0.4s ease-out;
+        }
+        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        .admin-inputs { display: flex; gap: 12px; align-items: center; }
+        input {
+            background: #2f3542;
+            border: 1px solid #57606f;
+            color: white;
+            padding: 12px;
+            border-radius: 10px;
+            outline: none;
+            width: 70px;
+            text-align: center;
+        }
+        input[type="password"] { width: 110px; }
+        button {
+            cursor: pointer;
+            background: var(--main-blue);
+            border: none;
+            color: white;
+            padding: 12px 20px;
+            border-radius: 10px;
+            font-weight: bold;
+            transition: 0.2s;
+        }
+        button:hover { background: #4bcffa; transform: translateY(-2px); }
+    </style>
+</head>
+<body>
+
+    <h1>퇴근까지 남은 시간 <span id="dolphin-btn">🐬</span></h1>
+    <div id="target-display">🎯 로딩 중...</div>
+    <div id="timer">0초</div>
+    <div class="message" id="msg">데이터를 가져오는 중입니다!! ! 🕵️‍♀️</div>
+
+    <div id="admin-panel">
+        <h3 style="color: var(--accent-yellow); margin: 0 0 15px 0; font-size: 1rem;">🛠 세령 전용 타임 리플레이서</h3>
+        <div class="admin-inputs">
+            <input type="number" id="hour" placeholder="시" min="0" max="23">
+            <input type="number" id="minute" placeholder="분" min="0" max="59">
+            <input type="password" id="pw" placeholder="비밀키">
+            <button onclick="updateTime()">SET</button>
+        </div>
+    </div>
+
+    <script>
+        let clickCount = 0;
+        let clickTimer = null;
+        const dolphinBtn = document.getElementById('dolphin-btn');
+        const adminPanel = document.getElementById('admin-panel');
+        
+        //  Railway 배포 완료 후 여기에 실제 주소 !
+        const API_URL = "https://your-project-name.up.railway.app"; 
+
+        //  돌고래 2번 클릭: 관리자 모드 소환
+        dolphinBtn.addEventListener('click', () => {
+            clickCount++;
+            dolphinBtn.style.transform = "scale(1.4) rotate(-15deg)";
+            setTimeout(() => { dolphinBtn.style.transform = "scale(1) rotate(0deg)"; }, 150);
+
+            if (clickCount === 2) {
+                const isHidden = adminPanel.style.display === 'none' || adminPanel.style.display === '';
+                adminPanel.style.display = isHidden ? 'block' : 'none';
+                clickCount = 0;
+            }
+            clearTimeout(clickTimer);
+            clickTimer = setTimeout(() => { clickCount = 0; }, 800);
+        });
+
+        // 관리자 시간 조작 함수
+        async function updateTime() {
+            const hour = document.getElementById('hour').value;
+            const minute = document.getElementById('minute').value;
+            const password = document.getElementById('pw').value;
+
+            if(!hour || !minute || !password) return alert("전부 다 입력해줘요!!");
+
+            try {
+                const response = await fetch(`${API_URL}/api/admin/set-time`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ 
+                        hour: parseInt(hour), 
+                        minute: parseInt(minute), 
+                        password: password 
+                    })
+                });
+
+                const result = await response.json();
+                if (response.ok) {
+                    alert(result.message);
+                    adminPanel.style.display = 'none';
+                } else {
+                    alert(result.detail);
+                }
+            } catch (e) {
+                alert("서버 연결 실패!! 주소를 다시 확인해주세요!! !");
+            }
+        }
+
+        // 실시간 타이머 업데이트 (H/M/S 포맷 적용)
+        setInterval(async () => {
+            try {
+                const response = await fetch(`${API_URL}/api/clock-out`);
+                const data = await response.json();
+                let seconds = data.seconds_left;
+                
+                document.getElementById("target-display").innerText = `🎯 오늘의 탈출 목표: ${data.target_time}`;
+
+                if (seconds <= 0) {
+                    document.getElementById("timer").innerText = "FREEDOM!! !";
+                    document.getElementById("timer").style.color = "#ff3f34";
+                    document.getElementById("msg").innerText = "노트북 던지고 당장 런 하세요!!! 🏃‍♀️💨✨";
+                    document.body.style.backgroundColor = "#2d3436";
+                } else {
+                    const h = Math.floor(seconds / 3600);
+                    const m = Math.floor((seconds % 3600) / 60);
+                    const s = seconds % 60;
+
+                    let timeString = "";
+                    if (h > 0) timeString += `${h}시간 `;
+                    if (m > 0 || h > 0) timeString += `${m}분 `;
+                    timeString += `${s}초`;
+
+                    document.getElementById("timer").innerText = timeString;
+                    document.getElementById("msg").innerText = "시간은 흐릅니다!! 조금만 더 존버!!! ⏳🔥";
+                    document.getElementById("timer").style.color = "#0fbcf9";
+                    document.body.style.backgroundColor = "#1e272e";
+                }
+            } catch (error) {
+                document.getElementById("timer").innerText = "OFFLINE";
+                document.getElementById("msg").innerText = "서버가 세령님을 기다리는 중... 🚨";
+            }
+        }, 1000);
+    </script>
+</body>
+</html>
