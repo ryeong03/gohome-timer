@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>세령이의 퇴근 타이머 🐬</title>
+    <title>세령이의 퇴근 타이머 ㅋ🐬</title>
     <style>
         :root {
             --bg-color: #1e272e;
@@ -98,7 +98,7 @@
 <body>
 
     <h1>퇴근까지 남은 시간 <span id="dolphin-btn">🐬</span></h1>
-    <div id="target-display">🎯 로딩 중...</div>
+    <div id="target-display"> 🐾 로딩 중...</div>
     <div id="timer">0초</div>
     <div class="message" id="msg">데이터를 가져오는 중입니다!! ! 🕵️‍♀️</div>
 
@@ -174,12 +174,12 @@
                 const data = await response.json();
                 let seconds = data.seconds_left;
                 
-                document.getElementById("target-display").innerText = `🎯 오늘의 탈출 목표: ${data.target_time}`;
+                document.getElementById("target-display").innerText = ` 💪🏽 오늘의 탈출 목표: ${data.target_time}`;
 
                 if (seconds <= 0) {
                     document.getElementById("timer").innerText = "FREEDOM!! !";
                     document.getElementById("timer").style.color = "#ff3f34";
-                    document.getElementById("msg").innerText = "노트북 던지고 당장 런 하세요!!! 🏃‍♀️💨✨";
+                    document.getElementById("msg").innerText = "노트북 던지고 당장 런 ?ㅋ!!! 🏃‍♀️💨✨";
                     document.body.style.backgroundColor = "#2d3436";
                 } else {
                     const h = Math.floor(seconds / 3600);
@@ -192,13 +192,13 @@
                     timeString += `${s}초`;
 
                     document.getElementById("timer").innerText = timeString;
-                    document.getElementById("msg").innerText = "시간은 흐릅니다!! 조금만 더 존버!!! ⏳🔥";
+                    document.getElementById("msg").innerText = "!! 조금만 더 기다령 🔥";
                     document.getElementById("timer").style.color = "#0fbcf9";
                     document.body.style.backgroundColor = "#1e272e";
                 }
             } catch (error) {
                 document.getElementById("timer").innerText = "OFFLINE";
-                document.getElementById("msg").innerText = "서버가 세령님을 기다리는 중... 🚨";
+                document.getElementById("msg").innerText = "서버가 세령이를 기다리는 중... 🚨";
             }
         }, 1000);
     </script>
