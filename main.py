@@ -53,6 +53,10 @@ class TimeUpdate(BaseModel):
     minute: int
     password: str
 
+@app.get("/")
+def read_root():
+    return {"message": "세령님의 퇴근 타이머 백엔드가 정상 작동 중입니다!! ! 🐬✨"}
+
 @app.get("/api/clock-out")
 def get_time_left():
     """현재 설정된 퇴근 시간과 남은 초를 반환합니다."""
@@ -74,6 +78,8 @@ def get_time_left():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail="데이터베이스 조회 실패")
+
+        
 
 @app.post("/api/admin/set-time")
 def set_target_time(data: TimeUpdate):
