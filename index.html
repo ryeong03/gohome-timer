@@ -120,11 +120,13 @@
         const titleText = document.getElementById('title-text');
         const adminTitle = document.getElementById('admin-title');
 
-        // 현재 URL 기준으로 slug 결정 (se, min, tutoring)
-        const path = window.location.pathname || '/';
-        let slug = 'se';
-        if (path.startsWith('/min')) slug = 'min';
-        else if (path.startsWith('/tutoring')) slug = 'tutoring';
+        // 현재 URL 쿼리스트링 기준으로 slug 결정 (?user=se|min|tutoring)
+        const params = new URLSearchParams(window.location.search);
+        const userParam = params.get('user');
+        let slug = 'se'; // 기본값: 세령
+        if (userParam === 'se') slug = 'se';
+        else if (userParam === 'min') slug = 'min';
+        else if (userParam === 'tutoring') slug = 'tutoring';
 
         const API_URL = window.location.origin;
 
@@ -182,7 +184,7 @@
             clickTimer = setTimeout(() => { clickCount = 0; }, 800);
         });
 
-        // 관리자 시간 조작 함수
+        // 관리자 시간 조작 함수 (JWT 로그인 + 설정)
         async function updateTime() {
             const hour = document.getElementById('hour').value;
             const minute = document.getElementById('minute').value;
@@ -191,14 +193,34 @@
             if(!hour || !minute || !password) return alert("전부 다 입력해줘요!!");
 
             try {
-                const response = await fetch(`${API_URL}/api/admin/set-time`, {
+                // 1단계: 로그인해서 토큰 발급
+                const loginRes = await fetch(`${API_URL}/api/admin/login`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ 
-                        hour: parseInt(hour), 
-                        minute: parseInt(minute), 
-                        password: password,
-                        slug: slug
+                    body: JSON.stringify({
+                        slug: slug,
+                        password: password
+                    })
+                });
+
+                const loginData = await loginRes.json();
+                if (!loginRes.ok) {
+                    alert(loginData.detail || "로그인 실패!");
+                    return;
+                }
+
+                const token = loginData.access_token;
+
+                // 2단계: 토큰으로 시간 설정
+                const response = await fetch(`${API_URL}/api/admin/set-time`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        hour: parseInt(hour),
+                        minute: parseInt(minute)
                     })
                 });
 
@@ -207,7 +229,7 @@
                     alert(result.message);
                     adminPanel.style.display = 'none';
                 } else {
-                    alert(result.detail);
+                    alert(result.detail || "시간 설정 실패");
                 }
             } catch (e) {
                 alert("서버 연결 실패!! 주소를 다시 확인해주세요!! !");

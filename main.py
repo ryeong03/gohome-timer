@@ -1,22 +1,32 @@
 import os
 import psycopg2
 from pathlib import Path
-from fastapi import FastAPI, HTTPException
+from datetime import datetime, timedelta
+
+import jwt
+from fastapi import FastAPI, HTTPException, Header, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from datetime import datetime
 from pydantic import BaseModel
 
 BASE_DIR = Path(__file__).resolve().parent
 
 app = FastAPI()
 
-# CORS 설정: 어떤 도메인에서든 접근 가능하게게
+# CORS 설정: 환경 변수 기반 허용 origin
+_origins_env = os.getenv("ALLOWED_ORIGINS")
+if _origins_env:
+    ALLOWED_ORIGINS = [o.strip() for o in _origins_env.split(",") if o.strip()]
+else:
+    # 환경 변수가 없으면 개발 편의를 위해 전체 허용
+    ALLOWED_ORIGINS = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 # Railway가 주입해주는 환경 변수들
@@ -25,6 +35,16 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 ADMIN_PASSWORD_SE = os.getenv("ADMIN_PASSWORD_SE") or os.getenv("ADMIN_PASSWORD")
 ADMIN_PASSWORD_MIN = os.getenv("ADMIN_PASSWORD_MIN")
 ADMIN_PASSWORD_TUTORING = os.getenv("ADMIN_PASSWORD_TUTORING")
+
+# JWT 설정 (반드시 환경 변수로만 설정되도록)
+JWT_SECRET = os.getenv("JWT_SECRET")
+if not JWT_SECRET:
+    raise RuntimeError("JWT_SECRET 환경 변수가 설정되지 않았습니다!")
+JWT_ALGORITHM = "HS256"
+
+# 간단한 IP 기반 레이트 리미트/실패 로그 상태 (메모리)
+_rate_limit_state: dict[str, dict] = {}
+_failed_login_state: dict[str, int] = {}
 
 
 def get_admin_password(slug: str) -> str | None:
@@ -35,6 +55,69 @@ def get_admin_password(slug: str) -> str | None:
     if slug == "tutoring":
         return ADMIN_PASSWORD_TUTORING
     return None
+
+
+def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
+    to_encode = data.copy()
+    expire = datetime.utcnow() + (expires_delta or timedelta(hours=12))
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def get_current_slug(authorization: str | None = Header(default=None)) -> str:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="인증 토큰이 필요합니다.")
+    token = authorization.split(" ", 1)[1].strip()
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        slug = payload.get("slug")
+        if slug not in ("se", "min", "tutoring"):
+            raise HTTPException(status_code=403, detail="유효하지 않은 토큰입니다.")
+        return slug
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="토큰이 만료되었습니다.")
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="유효하지 않은 토큰입니다.")
+
+
+def check_rate_limit(ip: str, key: str, limit: int = 10, window_sec: int = 60, block_sec: int = 3600) -> None:
+    """
+    매우 단순한 레이트 리미터.
+    - 같은 IP + key 조합 기준
+    - window_sec 동안 limit번 넘게 호출하면 block_sec 동안 차단
+    """
+    now = datetime.utcnow().timestamp()
+    state_key = f"{ip}:{key}"
+    info = _rate_limit_state.get(state_key)
+
+    if info is None:
+        _rate_limit_state[state_key] = {
+            "window_start": now,
+            "count": 1,
+            "blocked_until": 0.0,
+        }
+        return
+
+    # 차단 상태인지 확인
+    if info.get("blocked_until", 0.0) > now:
+        raise HTTPException(status_code=429, detail="요청이 너무 많아요. 잠깐 쉬어가기!")
+
+    window_start = info.get("window_start", now)
+    count = info.get("count", 0)
+
+    # 새 윈도우 시작
+    if now - window_start > window_sec:
+        info["window_start"] = now
+        info["count"] = 1
+        info["blocked_until"] = 0.0
+        return
+
+    # 같은 윈도우 안
+    count += 1
+    info["count"] = count
+    if count > limit:
+        info["blocked_until"] = now + block_sec
+        raise HTTPException(status_code=429, detail="시도를 너무 많이 했어요. 잠시 후에 다시 시도해주세요.")
 
 def get_db_connection():
     # 데이터베이스 연결 객체 생성
@@ -81,11 +164,15 @@ try:
 except Exception as e:
     print(f"DB Initialization Error: {e}")
 
+
+class LoginRequest(BaseModel):
+    slug: str
+    password: str
+
+
 class TimeUpdate(BaseModel):
     hour: int
     minute: int
-    password: str
-    slug: str = "se" 
 
 @app.get("/")
 def read_root():
@@ -144,14 +231,33 @@ def get_time_left_by_slug(slug: str):
 
         
 
-@app.post("/api/admin/set-time")
-def set_target_time(data: TimeUpdate):
-    """관리자 비밀번호를 확인한 후 해당 slug의 퇴근/종료 시간을 업데이트합니다."""
+@app.post("/api/admin/login")
+def admin_login(data: LoginRequest, request: Request):
+    """slug별 관리자 로그인 후 JWT 토큰 발급."""
+    # 레이트 리밋: IP별 로그인 시도 제한
+    client_ip = request.client.host if request.client else "unknown"
+    check_rate_limit(client_ip, "admin_login")
+
     if data.slug not in ("se", "min", "tutoring"):
         raise HTTPException(status_code=400, detail="올바른 slug가 아닙니다: se, min, tutoring")
     expected_pw = get_admin_password(data.slug)
     if not expected_pw or data.password != expected_pw:
-        raise HTTPException(status_code=403, detail="승인되지 않은 요청입니다.")
+        # 비밀번호 실패 횟수 누적 및 경고 로그
+        key = f"{client_ip}:{data.slug}"
+        count = _failed_login_state.get(key, 0) + 1
+        _failed_login_state[key] = count
+        if count >= 5:
+            print(f"⚠️ 경고: {client_ip} 에서 slug={data.slug} 비밀번호 연속 {count}회 실패")
+        raise HTTPException(status_code=403, detail="비밀번호가 틀렸습니다.")
+    # 성공 시 실패 카운트 리셋
+    _failed_login_state[f"{client_ip}:{data.slug}"] = 0
+    access_token = create_access_token({"slug": data.slug}, expires_delta=timedelta(hours=12))
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
+@app.post("/api/admin/set-time")
+def set_target_time(data: TimeUpdate, slug: str = Depends(get_current_slug)):
+    """JWT로 인증된 slug의 퇴근/종료 시간을 업데이트합니다."""
     if not (0 <= data.hour <= 23 and 0 <= data.minute <= 59):
         raise HTTPException(status_code=400, detail="올바른 시간 형식이 아닙니다.")
 
@@ -160,11 +266,11 @@ def set_target_time(data: TimeUpdate):
         cur = conn.cursor()
         cur.execute(
             "UPDATE timer_settings SET hour = %s, minute = %s WHERE slug = %s",
-            (data.hour, data.minute, data.slug)
+            (data.hour, data.minute, slug)
         )
         conn.commit()
         cur.close()
         conn.close()
-        return {"message": f"'{data.slug}' 타이머가 {data.hour:02d}:{data.minute:02d}로 설정되었습니다."}
+        return {"message": f"'{slug}' 타이머가 {data.hour:02d}:{data.minute:02d}로 설정되었습니다."}
     except Exception as e:
         raise HTTPException(status_code=500, detail="데이터베이스 업데이트 실패")
