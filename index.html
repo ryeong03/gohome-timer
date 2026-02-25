@@ -97,13 +97,13 @@
 </head>
 <body>
 
-    <h1>퇴근까지 남은 시간 <span id="dolphin-btn">🐬</span></h1>
+    <h1><span id="title-text">퇴근까지 남은 시간</span> <span id="dolphin-btn">🐬</span></h1>
     <div id="target-display"> 🐾 로딩 중...</div>
     <div id="timer">0초</div>
     <div class="message" id="msg">데이터를 가져오는 중입니다!! ! 🕵️‍♀️</div>
 
     <div id="admin-panel">
-        <h3 style="color: var(--accent-yellow); margin: 0 0 15px 0; font-size: 1rem;">🛠 세령 전용 타임 리플레이서</h3>
+        <h3 id="admin-title" style="color: var(--accent-yellow); margin: 0 0 15px 0; font-size: 1rem;">🛠 세령 전용 타임 리플레이서</h3>
         <div class="admin-inputs">
             <input type="number" id="hour" placeholder="시" min="0" max="23">
             <input type="number" id="minute" placeholder="분" min="0" max="59">
@@ -117,9 +117,55 @@
         let clickTimer = null;
         const dolphinBtn = document.getElementById('dolphin-btn');
         const adminPanel = document.getElementById('admin-panel');
-        
-        //  Railway 배포 완료 후 여기에 실제 주소 !
-        const API_URL = "https://gohome-timer.up.railway.app"; 
+        const titleText = document.getElementById('title-text');
+        const adminTitle = document.getElementById('admin-title');
+
+        // 현재 URL 기준으로 slug 결정 (se, min, tutoring)
+        const path = window.location.pathname || '/';
+        let slug = 'se';
+        if (path.startsWith('/min')) slug = 'min';
+        else if (path.startsWith('/tutoring')) slug = 'tutoring';
+
+        const API_URL = window.location.origin;
+
+        const configBySlug = {
+            se: {
+                pageTitle: '세령이의 퇴근 타이머 ㅋ🐬',
+                heading: '퇴근까지 남은 시간',
+                icon: '🐬',
+                targetPrefix: ' 💪🏽 오늘의 탈출 목표: ',
+                doneText: 'FREEDOM!! !',
+                doneMessage: '노트북 던지고 당장 런 ?ㅋ!!! 🏃‍♀️💨✨',
+                runningMessage: '!! 조금만 더 기다령 🔥',
+                adminTitle: '🛠 세령 전용 타임 리플레이서',
+            },
+            min: {
+                pageTitle: '미녕 공익 퇴근 타이머',
+                heading: '미녕 공익 퇴근까지 남은 시간',
+                icon: '🪖',
+                targetPrefix: ' 오늘 공익 퇴근 목표: ',
+                doneText: '퇴근!!',
+                doneMessage: '이제 세령이 만나러 갈 시간! ~~ ',
+                runningMessage: '조금만 더 기다려요 🔥',
+                adminTitle: '🛠 미녕 공익 퇴근 시간 설정',
+            },
+            tutoring: {
+                pageTitle: '주원이 수업 종료 타이머',
+                heading: '주원이 수업 남은 시간',
+                icon: '📚',
+                targetPrefix: ' 오늘 수업 종료: ',
+                doneText: '수업 끝!',
+                doneMessage: '오늘도 수고했어요! 🌟',
+                runningMessage: '집중해서 마무리보자아~ ✨',
+                adminTitle: '🛠 수업 종료 시간 설정',
+            },
+        };
+
+        const cfg = configBySlug[slug] || configBySlug.se;
+        document.title = cfg.pageTitle;
+        titleText.innerText = cfg.heading;
+        dolphinBtn.textContent = cfg.icon;
+        adminTitle.innerText = cfg.adminTitle;
 
         //  돌고래 2번 클릭: 관리자 모드 소환
         dolphinBtn.addEventListener('click', () => {
@@ -151,7 +197,8 @@
                     body: JSON.stringify({ 
                         hour: parseInt(hour), 
                         minute: parseInt(minute), 
-                        password: password 
+                        password: password,
+                        slug: slug
                     })
                 });
 
@@ -170,16 +217,16 @@
         // 실시간 타이머 업데이트 (H/M/S 포맷 적용)
         setInterval(async () => {
             try {
-                const response = await fetch(`${API_URL}/api/clock-out`);
+                const response = await fetch(`${API_URL}/api/clock-out/${slug}`);
                 const data = await response.json();
                 let seconds = data.seconds_left;
                 
-                document.getElementById("target-display").innerText = ` 💪🏽 오늘의 탈출 목표: ${data.target_time}`;
+                document.getElementById("target-display").innerText = `${cfg.targetPrefix}${data.target_time}`;
 
                 if (seconds <= 0) {
-                    document.getElementById("timer").innerText = "FREEDOM!! !";
+                    document.getElementById("timer").innerText = cfg.doneText;
                     document.getElementById("timer").style.color = "#ff3f34";
-                    document.getElementById("msg").innerText = "노트북 던지고 당장 런 ?ㅋ!!! 🏃‍♀️💨✨";
+                    document.getElementById("msg").innerText = cfg.doneMessage;
                     document.body.style.backgroundColor = "#2d3436";
                 } else {
                     const h = Math.floor(seconds / 3600);
@@ -192,7 +239,7 @@
                     timeString += `${s}초`;
 
                     document.getElementById("timer").innerText = timeString;
-                    document.getElementById("msg").innerText = "!! 조금만 더 기다령 🔥";
+                    document.getElementById("msg").innerText = cfg.runningMessage;
                     document.getElementById("timer").style.color = "#0fbcf9";
                     document.body.style.backgroundColor = "#1e272e";
                 }
