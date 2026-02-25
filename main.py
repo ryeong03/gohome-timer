@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import jwt
 from fastapi import FastAPI, HTTPException, Header, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -31,6 +31,8 @@ app.add_middleware(
 
 # Railway가 주입해주는 환경 변수들
 DATABASE_URL = os.getenv("DATABASE_URL")
+# 프론트엔드(공유 후 이동할) 기본 URL. 예: https://ryeong.github.io/gohome-timer/index.html
+FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "https://example.com/index.html")
 # slug별 관리자 비밀번호 (환경 변수로 분리) — se, min, tutoring
 ADMIN_PASSWORD_SE = os.getenv("ADMIN_PASSWORD_SE") or os.getenv("ADMIN_PASSWORD")
 ADMIN_PASSWORD_MIN = os.getenv("ADMIN_PASSWORD_MIN")
@@ -196,6 +198,59 @@ def friend_page():
 def tutoring_page():
     """주원이 수업 종료 타이머 페이지 (공용 타이머 화면 재사용)."""
     return FileResponse(BASE_DIR / "index.html")
+
+
+BASE_IMG_URL = "https://ryeong03.github.io/gohome-timer/images"  # GitHub Pages 이미지 경로
+
+SHARE_META = {
+    "se": {
+        "title": "세령이 탈출 타이머 🐬",
+        "description": "세령이 퇴근까지 남은 시간 확인하기",
+        "image": f"{BASE_IMG_URL}/og-se.png",
+    },
+    "min": {
+        "title": "미녕 공익 퇴근 타이머 🪖",
+        "description": "미녕이 공익 퇴근까지 남은 시간 확인하기",
+        "image": f"{BASE_IMG_URL}/og-min.png",
+    },
+    "tutoring": {
+        "title": "주원이 수업 종료 타이머 📚",
+        "description": "주원이 수업 끝날 때까지 남은 시간 확인하기",
+        "image": f"{BASE_IMG_URL}/og-tutoring.png",
+    },
+}
+
+
+@app.get("/share/{slug}", response_class=HTMLResponse)
+def share_page(slug: str):
+    """
+    링크 공유용 페이지.
+    - 카톡/디코 등은 여기 OG 태그를 보고 미리보기를 만들고
+    - 브라우저는 FRONTEND_BASE_URL?user=slug 로 리다이렉트된다.
+    """
+    if slug not in SHARE_META:
+        raise HTTPException(status_code=404, detail="존재하지 않는 공유 링크입니다.")
+
+    cfg = SHARE_META[slug]
+    target_url = f"{FRONTEND_BASE_URL}?user={slug}"
+    html = f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>{cfg['title']}</title>
+  <meta property="og:title" content="{cfg['title']}">
+  <meta property="og:description" content="{cfg['description']}">
+  <meta property="og:image" content="{cfg['image']}">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="{target_url}">
+  <meta http-equiv="refresh" content="0; url={target_url}">
+</head>
+<body>
+  <p>공유 링크로 이동 중입니다... <a href="{target_url}">바로 이동</a></p>
+</body>
+</html>
+"""
+    return HTMLResponse(content=html)
 
 def _get_time_left_by_slug(slug: str):
     """slug에 해당하는 타이머 설정으로 남은 초를 계산합니다."""
