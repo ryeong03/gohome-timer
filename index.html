@@ -128,8 +128,8 @@
         else if (userParam === 'min') slug = 'min';
         else if (userParam === 'tutoring') slug = 'tutoring';
 
-        const API_URL = window.location.origin;
-
+        const API_URL = "https://gohome-timer.up.railway.app";
+        
         // JWT 토큰 상태 (메모리 + 리프레시 토큰은 localStorage)
         let accessToken = "";
         let refreshToken = localStorage.getItem('refresh_token') || "";
