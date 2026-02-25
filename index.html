@@ -130,6 +130,43 @@
 
         const API_URL = window.location.origin;
 
+        // JWT 토큰 상태 (메모리 + 리프레시 토큰은 localStorage)
+        let accessToken = "";
+        let refreshToken = localStorage.getItem('refresh_token') || "";
+
+        async function fetchWithToken(url, options = {}) {
+            const opts = { ...options };
+            opts.headers = { ...(opts.headers || {}) };
+            if (accessToken) {
+                opts.headers["Authorization"] = `Bearer ${accessToken}`;
+            }
+
+            let response = await fetch(url, opts);
+
+            // 액세스 토큰 만료 등으로 401이 나면 리프레시 토큰으로 재시도
+            if (response.status === 401 && refreshToken) {
+                try {
+                    const refreshRes = await fetch(`${API_URL}/api/admin/refresh`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ refresh_token: refreshToken })
+                    });
+
+                    if (refreshRes.ok) {
+                        const data = await refreshRes.json();
+                        accessToken = data.access_token;
+                        // 원래 요청 다시 시도
+                        opts.headers["Authorization"] = `Bearer ${accessToken}`;
+                        response = await fetch(url, opts);
+                    }
+                } catch (e) {
+                    // 리프레시 실패 시에는 그대로 401 유지
+                }
+            }
+
+            return response;
+        }
+
         const configBySlug = {
             se: {
                 pageTitle: '세령이의 퇴근 타이머 ㅋ🐬',
@@ -184,40 +221,44 @@
             clickTimer = setTimeout(() => { clickCount = 0; }, 800);
         });
 
-        // 관리자 시간 조작 함수 (JWT 로그인 + 설정)
+        // 관리자 시간 조작 함수 (JWT 로그인 + 설정 + 리프레시)
         async function updateTime() {
             const hour = document.getElementById('hour').value;
             const minute = document.getElementById('minute').value;
             const password = document.getElementById('pw').value;
 
-            if(!hour || !minute || !password) return alert("전부 다 입력해줘요!!");
+            if(!hour || !minute) return alert("시간을 전부 다 입력해줘요!!");
+            if(!password && !refreshToken) return alert("비밀키를 입력하거나, 먼저 한 번 로그인해야 해요!");
 
             try {
-                // 1단계: 로그인해서 토큰 발급
-                const loginRes = await fetch(`${API_URL}/api/admin/login`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        slug: slug,
-                        password: password
-                    })
-                });
+                // 비밀번호가 입력된 경우: 새로 로그인해서 토큰 갱신
+                if (password) {
+                    const loginRes = await fetch(`${API_URL}/api/admin/login`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            slug: slug,
+                            password: password
+                        })
+                    });
 
-                const loginData = await loginRes.json();
-                if (!loginRes.ok) {
-                    alert(loginData.detail || "로그인 실패!");
-                    return;
+                    const loginData = await loginRes.json();
+                    if (!loginRes.ok) {
+                        alert(loginData.detail || "로그인 실패!");
+                        return;
+                    }
+
+                    accessToken = loginData.access_token;
+                    refreshToken = loginData.refresh_token;
+                    if (refreshToken) {
+                        localStorage.setItem('refresh_token', refreshToken);
+                    }
                 }
 
-                const token = loginData.access_token;
-
-                // 2단계: 토큰으로 시간 설정
-                const response = await fetch(`${API_URL}/api/admin/set-time`, {
+                // 토큰으로 시간 설정 (필요 시 내부에서 자동 리프레시)
+                const response = await fetchWithToken(`${API_URL}/api/admin/set-time`, {
                     method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "Authorization": `Bearer ${token}`
-                    },
+                    headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         hour: parseInt(hour),
                         minute: parseInt(minute)

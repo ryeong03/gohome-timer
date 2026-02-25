@@ -40,6 +40,9 @@ ADMIN_PASSWORD_TUTORING = os.getenv("ADMIN_PASSWORD_TUTORING")
 JWT_SECRET = os.getenv("JWT_SECRET")
 if not JWT_SECRET:
     raise RuntimeError("JWT_SECRET 환경 변수가 설정되지 않았습니다!")
+REFRESH_SECRET = os.getenv("REFRESH_SECRET")
+if not REFRESH_SECRET:
+    raise RuntimeError("REFRESH_SECRET 환경 변수가 설정되지 않았습니다!")
 JWT_ALGORITHM = "HS256"
 
 # 간단한 IP 기반 레이트 리미트/실패 로그 상태 (메모리)
@@ -170,6 +173,10 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
 class TimeUpdate(BaseModel):
     hour: int
     minute: int
@@ -251,8 +258,38 @@ def admin_login(data: LoginRequest, request: Request):
         raise HTTPException(status_code=403, detail="비밀번호가 틀렸습니다.")
     # 성공 시 실패 카운트 리셋
     _failed_login_state[f"{client_ip}:{data.slug}"] = 0
-    access_token = create_access_token({"slug": data.slug}, expires_delta=timedelta(hours=12))
-    return {"access_token": access_token, "token_type": "bearer"}
+
+    # 짧은 수명의 액세스 토큰 (예: 15분)
+    access_token = create_access_token({"slug": data.slug}, expires_delta=timedelta(minutes=15))
+    # 더 긴 수명의 리프레시 토큰 (예: 7일)
+    refresh_payload = {"slug": data.slug, "exp": datetime.utcnow() + timedelta(days=7)}
+    refresh_token = jwt.encode(refresh_payload, REFRESH_SECRET, algorithm=JWT_ALGORITHM)
+
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+    }
+
+
+@app.post("/api/admin/refresh")
+def refresh_access_token(data: RefreshRequest, request: Request):
+    """리프레시 토큰으로 새로운 액세스 토큰 발급."""
+    client_ip = request.client.host if request.client else "unknown"
+    # 리프레시도 과도한 시도 방지용 레이트 리밋
+    check_rate_limit(client_ip, "admin_refresh", limit=30, window_sec=60, block_sec=3600)
+
+    try:
+        payload = jwt.decode(data.refresh_token, REFRESH_SECRET, algorithms=[JWT_ALGORITHM])
+        slug = payload.get("slug")
+        if slug not in ("se", "min", "tutoring"):
+            raise HTTPException(status_code=401, detail="다시 로그인하세요.")
+        new_access = create_access_token({"slug": slug}, expires_delta=timedelta(minutes=15))
+        return {"access_token": new_access}
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="리프레시 토큰이 만료되었습니다. 다시 로그인하세요.")
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="다시 로그인하세요.")
 
 
 @app.post("/api/admin/set-time")
