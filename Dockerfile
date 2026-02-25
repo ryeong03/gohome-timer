@@ -7,3 +7,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 # Railway의 PORT 환경 변수를 사용하도록 설정
 CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}"]
+ 
